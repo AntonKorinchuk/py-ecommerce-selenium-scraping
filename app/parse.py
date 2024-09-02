@@ -2,12 +2,17 @@ import csv
 import os
 import time
 from dataclasses import dataclass, astuple, fields
-from typing import List
+from typing import List, Optional
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common import (
+    NoSuchElementException,
+    TimeoutException,
+    ElementNotInteractableException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -53,22 +58,22 @@ def parse_single_product(product_soup: BeautifulSoup) -> Product:
     )
 
 
-def get_page_products(url: str) -> List[Product]:
-    page = requests.get(url).text
-    soup = BeautifulSoup(page, "html.parser")
-    products_soup = soup.select(".thumbnail")
-    return [parse_single_product(product) for product in products_soup]
+def get_page_products(
+    url: str, paginated: Optional[bool] = False
+) -> List[Product]:
+    if not paginated:
+        page = requests.get(url).text
+        soup = BeautifulSoup(page, "html.parser")
+        products_soup = soup.select(".thumbnail")
+        return [parse_single_product(product) for product in products_soup]
 
-
-def get_page_products_with_buttons(url: str) -> List[Product]:
     options = Options()
-    options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     service = Service(ChromeDriverManager().install())
 
-    driver = webdriver.Chrome(service=service)
+    driver = webdriver.Chrome(service=service, options=options)
     driver.get(url)
     products = []
 
@@ -88,7 +93,11 @@ def get_page_products_with_buttons(url: str) -> List[Product]:
             )
             driver.execute_script("arguments[0].click();", more_button)
             time.sleep(4)
-        except Exception:
+        except (
+            NoSuchElementException,
+            TimeoutException,
+            ElementNotInteractableException,
+        ):
             break
 
     driver.quit()
@@ -112,11 +121,8 @@ def get_all_products() -> None:
         TOUCHES_URL: ("touch.csv", True),
     }
 
-    for url, (filename, with_buttons) in urls.items():
-        if with_buttons:
-            products = get_page_products_with_buttons(url)
-        else:
-            products = get_page_products(url)
+    for url, (filename, is_paginated) in urls.items():
+        products = get_page_products(url, paginated=is_paginated)
         write_to_csv(products, filename)
 
 
