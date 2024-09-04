@@ -2,10 +2,9 @@ import csv
 import os
 import time
 from dataclasses import dataclass, astuple, fields
-from typing import List, Optional
+from typing import List
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common import (
@@ -13,25 +12,22 @@ from selenium.common import (
     TimeoutException,
     ElementNotInteractableException,
 )
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
+
 
 BASE_URL = "https://webscraper.io/"
 HOME_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/")
 
 COMPUTERS_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/computers/")
-LAPTOPS_URL = urljoin(
-    BASE_URL, "test-sites/e-commerce/more/computers/laptops/"
-)
-TABLETS_URL = urljoin(
-    BASE_URL, "test-sites/e-commerce/more/computers/tablets/"
-)
+LAPTOPS_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/computers/laptops")
+TABLETS_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/computers/tablets")
 PHONES_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/phones/")
-TOUCHES_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/phones/touch/")
+TOUCHES_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/phones/touch")
 
 
 @dataclass
@@ -51,56 +47,57 @@ def parse_single_product(product_soup: BeautifulSoup) -> Product:
         title=product_soup.select_one(".title")["title"],
         description=product_soup.select_one(".description").text,
         price=float(product_soup.select_one(".price").text.replace("$", "")),
-        rating=int(product_soup.select_one("p[data-rating]")["data-rating"]),
+        rating=len(product_soup.select(".ratings span.ws-icon.ws-icon-star")),
         num_of_reviews=int(
             product_soup.select_one(".ratings > p.float-end").text.split()[0]
         ),
     )
 
 
-def get_page_products(
-    url: str, paginated: Optional[bool] = False
-) -> List[Product]:
-    if not paginated:
-        page = requests.get(url).text
-        soup = BeautifulSoup(page, "html.parser")
-        products_soup = soup.select(".thumbnail")
-        return [parse_single_product(product) for product in products_soup]
-
+def get_page_products(url: str) -> List[Product]:
+    print(f"Getting products from: {url}")
     options = Options()
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    service = Service(ChromeDriverManager().install())
+    options.add_argument("--headless")
 
-    driver = webdriver.Chrome(service=service, options=options)
+    service = Service(GeckoDriverManager().install())
+    driver = webdriver.Firefox(service=service, options=options)
     driver.get(url)
     products = []
 
-    while True:
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, "html.parser")
-        products_soup = soup.select(".thumbnail")
-        products.extend(
-            [parse_single_product(product) for product in products_soup]
-        )
-
-        try:
-            more_button = WebDriverWait(driver, 10).until(
-                expected_conditions.element_to_be_clickable(
-                    (By.CLASS_NAME, "ecomerce-items-scroll-more")
-                )
+    try:
+        while True:
+            print("Fetching page source...")
+            page_source = driver.page_source
+            soup = BeautifulSoup(page_source, "html.parser")
+            products_soup = soup.select(".thumbnail")
+            print(f"Found {len(products_soup)} products on this page.")
+            products.extend(
+                [parse_single_product(product) for product in products_soup]
             )
-            driver.execute_script("arguments[0].click();", more_button)
-            time.sleep(4)
-        except (
-            NoSuchElementException,
-            TimeoutException,
-            ElementNotInteractableException,
-        ):
-            break
 
-    driver.quit()
+            try:
+                print("Looking for 'more' button...")
+                more_button = WebDriverWait(driver, 5).until(
+                    expected_conditions.presence_of_element_located(
+                        (By.CLASS_NAME, "ecomerce-items-scroll-more")
+                    )
+                )
+                if more_button.is_displayed():
+                    print("Clicking 'more' button...")
+                    more_button.click()
+                else:
+                    print("No more products to load.")
+                    break
+            except (
+                NoSuchElementException,
+                TimeoutException,
+                ElementNotInteractableException,
+            ):
+                print("No 'more' button found or error occurred.")
+                break
+    finally:
+        print("Quitting driver...")
+        driver.quit()
     return products
 
 
@@ -113,16 +110,16 @@ def write_to_csv(products: List[Product], filename: str) -> None:
 
 def get_all_products() -> None:
     urls = {
-        HOME_URL: ("home.csv", False),
-        COMPUTERS_URL: ("computers.csv", False),
-        PHONES_URL: ("phones.csv", False),
-        LAPTOPS_URL: ("laptops.csv", True),
-        TABLETS_URL: ("tablets.csv", True),
-        TOUCHES_URL: ("touch.csv", True),
+        HOME_URL: "home.csv",
+        COMPUTERS_URL: "computers.csv",
+        PHONES_URL: "phones.csv",
+        LAPTOPS_URL: "laptops.csv",
+        TABLETS_URL: "tablets.csv",
+        TOUCHES_URL: "touch.csv",
     }
 
-    for url, (filename, is_paginated) in urls.items():
-        products = get_page_products(url, paginated=is_paginated)
+    for url, filename in urls.items():
+        products = get_page_products(url)
         write_to_csv(products, filename)
 
 
