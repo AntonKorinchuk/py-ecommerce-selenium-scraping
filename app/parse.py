@@ -1,8 +1,6 @@
 import csv
 import os
-import time
 from dataclasses import dataclass, astuple, fields
-from typing import List
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -54,7 +52,7 @@ def parse_single_product(product_soup: BeautifulSoup) -> Product:
     )
 
 
-def get_page_products(url: str) -> List[Product]:
+def get_page_products(url: str) -> list[Product]:
     print(f"Getting products from: {url}")
     options = Options()
     options.add_argument("--headless")
@@ -101,7 +99,7 @@ def get_page_products(url: str) -> List[Product]:
     return products
 
 
-def write_to_csv(products: List[Product], filename: str) -> None:
+def write_to_csv(products: list[Product], filename: str) -> None:
     with open(os.path.join(os.pardir, filename), "w", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(PRODUCT_FIELDS)
